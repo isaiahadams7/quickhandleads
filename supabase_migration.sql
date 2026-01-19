@@ -8,3 +8,7 @@ ADD COLUMN IF NOT EXISTS api_queries_used INTEGER DEFAULT 0;
 UPDATE search_history
 SET api_queries_used = 0
 WHERE api_queries_used IS NULL;
+
+-- Add location_match flag to leads
+ALTER TABLE leads
+ADD COLUMN IF NOT EXISTS location_match BOOLEAN DEFAULT FALSE;

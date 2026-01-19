@@ -80,12 +80,17 @@ class LeadDatabase:
                 phone TEXT,
                 template TEXT,
                 locations TEXT,
+                location_match INTEGER DEFAULT 0,
                 url_hash TEXT UNIQUE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 times_seen INTEGER DEFAULT 1
             )
         """)
+        try:
+            cursor.execute("ALTER TABLE leads ADD COLUMN location_match INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
 
         # Search history table
         cursor.execute("""
@@ -165,7 +170,12 @@ class LeadDatabase:
                         phone = COALESCE(NULLIF(?, ''), phone),
                         first_name = COALESCE(NULLIF(?, ''), first_name),
                         last_name = COALESCE(NULLIF(?, ''), last_name),
-                        company_name = COALESCE(NULLIF(?, ''), company_name)
+                        company_name = COALESCE(NULLIF(?, ''), company_name),
+                        location_match = CASE
+                            WHEN location_match = 1 THEN 1
+                            WHEN ? = 1 THEN 1
+                            ELSE 0
+                        END
                     WHERE id = ?
                 """, (
                     times_seen + 1,
@@ -174,6 +184,7 @@ class LeadDatabase:
                     lead.get('first_name', ''),
                     lead.get('last_name', ''),
                     lead.get('company_name', ''),
+                    1 if lead.get('location_match') else 0,
                     lead_id
                 ))
                 duplicate_leads.append(lead)
@@ -183,8 +194,8 @@ class LeadDatabase:
                     INSERT INTO leads (
                         first_name, last_name, company_name,
                         website_url, email, phone,
-                        template, locations, url_hash
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        template, locations, location_match, url_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     lead.get('first_name', ''),
                     lead.get('last_name', ''),
@@ -194,6 +205,7 @@ class LeadDatabase:
                     lead.get('phone', ''),
                     template,
                     location_str,
+                    1 if lead.get('location_match') else 0,
                     url_hash
                 ))
                 new_leads.append(lead)

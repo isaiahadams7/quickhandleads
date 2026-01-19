@@ -78,6 +78,8 @@ class SupabaseLeadDatabase:
                     update_data['last_name'] = lead['last_name']
                 if lead.get('company_name'):
                     update_data['company_name'] = lead['company_name']
+                if lead.get('location_match'):
+                    update_data['location_match'] = True
 
                 self.supabase.table('leads').update(update_data).eq('id', existing_lead['id']).execute()
                 duplicate_leads.append(lead)
@@ -93,7 +95,8 @@ class SupabaseLeadDatabase:
                     'template': template,
                     'locations': location_str,
                     'url_hash': url_hash,
-                    'times_seen': 1
+                    'times_seen': 1,
+                    'location_match': bool(lead.get('location_match'))
                 }
 
                 self.supabase.table('leads').insert(insert_data).execute()

@@ -119,6 +119,9 @@ def apply_location_badge(df: pd.DataFrame) -> pd.DataFrame:
 
 def lead_location_match(lead: pd.Series) -> bool:
     """Best-effort location match using stored locations and lead fields."""
+    existing = lead.get("location_match")
+    if isinstance(existing, bool):
+        return existing
     locations_str = lead.get("locations", "") or ""
     locations = [loc.strip() for loc in locations_str.split(",") if loc.strip()]
     result_stub = {
