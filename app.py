@@ -15,6 +15,7 @@ from google_search import (
     rank_results_by_locations,
     result_matches_locations
 )
+from google_places import GooglePlacesClient, normalize_places_result, places_query_for_template
 from contact_extractor import ContactExtractor
 from search_templates import SearchTemplates
 from database import get_database as get_db_instance
@@ -113,6 +114,18 @@ def apply_location_badge(df: pd.DataFrame) -> pd.DataFrame:
         return row
 
     return df.apply(add_badge, axis=1)
+
+
+def lead_location_match(lead: pd.Series) -> bool:
+    """Best-effort location match using stored locations and lead fields."""
+    locations_str = lead.get("locations", "") or ""
+    locations = [loc.strip() for loc in locations_str.split(",") if loc.strip()]
+    result_stub = {
+        "title": lead.get("company_name", "") or "",
+        "snippet": "",
+        "link": lead.get("website_url", "") or ""
+    }
+    return result_matches_locations(result_stub, locations)
 
 
 def render_search_page():
@@ -284,17 +297,26 @@ def render_search_page():
         status_text = st.empty()
 
         try:
-            # Initialize client
+            # Initialize client(s)
             status_text.text("🔧 Initializing...")
             progress_bar.progress(10)
-            client = GoogleSearchClient()
+
+            use_places = template_name in {"realtors", "contractors", "investors"}
+            places_client = None
+            if use_places:
+                try:
+                    places_client = GooglePlacesClient()
+                except Exception:
+                    use_places = False
+
+            search_client = GoogleSearchClient()
 
             # Build query
             status_text.text("🔍 Building query...")
             progress_bar.progress(20)
 
             if set(selected_sites) != set(template['sites']):
-                query = client.build_query(
+                query = search_client.build_query(
                     keywords=template["keywords"],
                     locations=locations,
                     sites=selected_sites,
@@ -312,7 +334,28 @@ def render_search_page():
             status_text.text(f"🌐 Searching Google...")
             progress_bar.progress(30)
 
-            results = client.search_multiple_pages(query, total_results=max_results, delay=0.5)
+            results = []
+            results_source = "cse"
+            if use_places and places_client:
+                status_text.text("📍 Searching Places (geo)...")
+                progress_bar.progress(30)
+                places_query = places_query_for_template(template_name)
+                places_raw = places_client.search_locations(
+                    base_query=places_query,
+                    locations=locations,
+                    max_results=max_results
+                )
+                results = [normalize_places_result(p) for p in places_raw]
+                results_source = "places"
+
+                if not results:
+                    status_text.text("🌐 Places returned 0, falling back to Google CSE...")
+                    results = search_client.search_multiple_pages(query, total_results=max_results, delay=0.5)
+                    results_source = "cse"
+            else:
+                results = search_client.search_multiple_pages(query, total_results=max_results, delay=0.5)
+                results_source = "cse"
+
             ranked_results = rank_results_by_locations(results, locations)
             progress_bar.progress(60)
 
@@ -332,14 +375,41 @@ def render_search_page():
             contacts = []
             extractor = ContactExtractor()
 
-            for result in ranked_results:
-                contact_info = extractor.extract_contact_info(
-                    title=result.get("title", ""),
-                    snippet=result.get("snippet", ""),
-                    link=result.get("link", "")
-                )
-                contact_info["location_match"] = result_matches_locations(result, locations)
-                contacts.append(contact_info)
+            if results_source == "places" and places_client:
+                for place in places_raw:
+                    place_id = place.get("place_id", "")
+                    details = {}
+                    if place_id:
+                        try:
+                            details = places_client.place_details(place_id).get("result", {})
+                        except Exception:
+                            details = {}
+                    contact_info = {
+                        "first_name": None,
+                        "last_name": None,
+                        "company_name": place.get("name", ""),
+                        "website_url": details.get("website") or normalize_places_result(place).get("link", ""),
+                        "email": None,
+                        "phone": details.get("formatted_phone_number", "")
+                    }
+                    contact_info["location_match"] = result_matches_locations(
+                        {
+                            "title": place.get("name", ""),
+                            "snippet": place.get("formatted_address", ""),
+                            "link": contact_info["website_url"]
+                        },
+                        locations
+                    )
+                    contacts.append(contact_info)
+            else:
+                for result in ranked_results:
+                    contact_info = extractor.extract_contact_info(
+                        title=result.get("title", ""),
+                        snippet=result.get("snippet", ""),
+                        link=result.get("link", "")
+                    )
+                    contact_info["location_match"] = result_matches_locations(result, locations)
+                    contacts.append(contact_info)
 
             progress_bar.progress(80)
 
@@ -348,6 +418,11 @@ def render_search_page():
                 c for c in contacts
                 if c.get('website_url') and (c.get('email') or c.get('phone'))  # Must have contact info
             ]
+            if results_source == "places":
+                useful_contacts = [
+                    c for c in contacts
+                    if c.get('website_url') or c.get('phone')
+                ]
 
             # Save to database and detect duplicates
             status_text.text("💾 Saving to database...")
@@ -465,7 +540,7 @@ def render_database_page():
     # Sorting
     sort_by = st.sidebar.selectbox(
         "Sort by",
-        ["Newest First", "Oldest First", "Most Seen", "Has Email", "Has Phone"]
+        ["Newest First", "Oldest First", "Most Seen", "Has Email", "Has Phone", "Location Match"]
     )
 
     # Search box
@@ -530,6 +605,9 @@ def render_database_page():
         df = df.sort_values('email', ascending=False, na_position='last')
     elif sort_by == "Has Phone":
         df = df.sort_values('phone', ascending=False, na_position='last')
+    elif sort_by == "Location Match":
+        df['location_match'] = df.apply(lead_location_match, axis=1)
+        df = df.sort_values(['location_match', 'created_at'], ascending=[False, False])
 
     # Display columns
     display_columns = [
