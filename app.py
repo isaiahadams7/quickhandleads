@@ -120,6 +120,36 @@ def apply_location_badge(df: pd.DataFrame) -> pd.DataFrame:
     return df.apply(add_badge, axis=1)
 
 
+def apply_quality_badges(df: pd.DataFrame) -> pd.DataFrame:
+    """Add compact badges to highlight lead quality signals."""
+    def add_badges(row: pd.Series) -> pd.Series:
+        badges = []
+        if row.get("intent_match"):
+            badges.append("🎯")
+        if row.get("location_match"):
+            badges.append("📍")
+        if row.get("lead_recency_days", 9999) <= 7:
+            badges.append("🕒")
+        if row.get("contact_score", 0) >= 10:
+            badges.append("☎")
+        if row.get("lead_source") == "places":
+            badges.append("🏢")
+
+        if not badges:
+            return row
+
+        badge_str = " ".join(badges)
+        if row.get("company_name"):
+            row["company_name"] = f"{badge_str} {row['company_name']}"
+        elif row.get("first_name"):
+            row["first_name"] = f"{badge_str} {row['first_name']}"
+        elif row.get("last_name"):
+            row["last_name"] = f"{badge_str} {row['last_name']}"
+        return row
+
+    return df.apply(add_badges, axis=1)
+
+
 def lead_location_match(lead: pd.Series) -> bool:
     """Best-effort location match using stored locations and lead fields."""
     existing = lead.get("location_match")
@@ -133,6 +163,85 @@ def lead_location_match(lead: pd.Series) -> bool:
         "link": lead.get("website_url", "") or ""
     }
     return result_matches_locations(result_stub, locations)
+
+
+def detect_intent_match(text: str) -> bool:
+    phrases = reddit_intent_phrases()
+    text_lower = (text or "").lower()
+    return any(phrase in text_lower for phrase in phrases)
+
+
+def lead_source_from_link(link: str) -> str:
+    if not link:
+        return "cse"
+    link_lower = link.lower()
+    if "reddit.com" in link_lower:
+        return "reddit"
+    if "facebook.com" in link_lower:
+        return "facebook"
+    if "instagram.com" in link_lower:
+        return "instagram"
+    if "linkedin.com" in link_lower:
+        return "linkedin"
+    if "nextdoor.com" in link_lower:
+        return "nextdoor"
+    if "tiktok.com" in link_lower:
+        return "tiktok"
+    if "youtube.com" in link_lower:
+        return "youtube"
+    if "pinterest.com" in link_lower:
+        return "pinterest"
+    if "craigslist.org" in link_lower:
+        return "craigslist"
+    return "cse"
+
+
+def compute_lead_score(row: pd.Series) -> pd.Series:
+    """Compute a 0-100 lead score and helper fields for display."""
+    score = 0
+    if row.get("location_match"):
+        score += 35
+    if row.get("intent_match"):
+        score += 30
+
+    recency_days = row.get("lead_recency_days", 9999)
+    if recency_days <= 7:
+        score += 20
+    elif recency_days <= 30:
+        score += 15
+    elif recency_days <= 60:
+        score += 10
+    elif recency_days <= 90:
+        score += 5
+
+    contact_score = 0
+    if row.get("email"):
+        contact_score += 7
+    if row.get("phone"):
+        contact_score += 7
+    if row.get("website_url"):
+        contact_score += 6
+    score += contact_score
+
+    source = row.get("lead_source")
+    if source == "places":
+        score += 8
+    elif source == "linkedin":
+        score += 5
+    elif source == "facebook":
+        score += 4
+    elif source == "instagram":
+        score += 3
+    elif source == "reddit":
+        score += 2
+    else:
+        score += 3
+
+    score = min(100, score)
+
+    row["lead_score"] = int(score)
+    row["contact_score"] = contact_score
+    return row
 
 
 def run_cse_search(
@@ -390,7 +499,7 @@ def render_search_page():
             status_text.text("🔍 Building query...")
             progress_bar.progress(20)
 
-            intent_phrases = reddit_intent_phrases() if "reddit.com" in selected_sites else None
+            intent_phrases = reddit_intent_phrases()
             exclude_terms = list(template["exclude_terms"])
             reddit_subs = None
             if "reddit.com" in selected_sites:
@@ -452,7 +561,7 @@ def render_search_page():
                         "are enabled and your key allows server-side use. "
                         f"{geo_note}".strip()
                     )
-                    date_restrict = "d60" if "reddit.com" in selected_sites else None
+                    date_restrict = "d60"
                     results = run_cse_search(
                         search_client,
                         query,
@@ -465,7 +574,7 @@ def render_search_page():
                         results = filter_recent_reddit_results(results, max_age_days=60)
                     results_source = "cse"
             else:
-                date_restrict = "d60" if "reddit.com" in selected_sites else None
+                date_restrict = "d60"
                 results = run_cse_search(
                     search_client,
                     query,
@@ -523,6 +632,8 @@ def render_search_page():
                         },
                         locations
                     )
+                    contact_info["intent_match"] = False
+                    contact_info["lead_source"] = "places"
                     contacts.append(contact_info)
             else:
                 for result in ranked_results:
@@ -531,7 +642,10 @@ def render_search_page():
                         snippet=result.get("snippet", ""),
                         link=result.get("link", "")
                     )
+                    combined_text = f"{result.get('title', '')} {result.get('snippet', '')}"
                     contact_info["location_match"] = result_matches_locations(result, locations)
+                    contact_info["intent_match"] = detect_intent_match(combined_text)
+                    contact_info["lead_source"] = lead_source_from_link(result.get("link", ""))
                     contacts.append(contact_info)
 
             progress_bar.progress(80)
@@ -663,11 +777,12 @@ def render_database_page():
     # Sorting
     sort_by = st.sidebar.selectbox(
         "Sort by",
-        ["Newest First", "Oldest First", "Most Seen", "Has Email", "Has Phone", "Location Match"]
+        ["Newest First", "Oldest First", "Most Seen", "Has Email", "Has Phone", "Location Match", "Lead Score"]
     )
 
     # Search box
     search_query = st.sidebar.text_input("🔍 Search in database", "")
+    min_score = st.sidebar.slider("⭐ Min Lead Score", min_value=0, max_value=100, value=0, step=5)
 
     st.sidebar.markdown("---")
 
@@ -717,6 +832,25 @@ def render_database_page():
         mask = df.apply(lambda row: row.astype(str).str.contains(search_query, case=False).any(), axis=1)
         df = df[mask]
 
+    if 'location_match' not in df.columns:
+        df['location_match'] = df.apply(lead_location_match, axis=1)
+
+    if 'intent_match' not in df.columns:
+        df['intent_match'] = False
+    else:
+        df['intent_match'] = df['intent_match'].fillna(False)
+    if 'lead_source' not in df.columns:
+        df['lead_source'] = ""
+    else:
+        df['lead_source'] = df['lead_source'].fillna("")
+
+    created_at = pd.to_datetime(df['created_at'], utc=True, errors='coerce')
+    df['lead_recency_days'] = (pd.Timestamp.utcnow() - created_at).dt.days.fillna(9999)
+    df = df.apply(compute_lead_score, axis=1)
+
+    if min_score > 0:
+        df = df[df['lead_score'] >= min_score]
+
     # Apply sorting
     if sort_by == "Newest First":
         df = df.sort_values('created_at', ascending=False)
@@ -729,16 +863,15 @@ def render_database_page():
     elif sort_by == "Has Phone":
         df = df.sort_values('phone', ascending=False, na_position='last')
     elif sort_by == "Location Match":
-        df['location_match'] = df.apply(lead_location_match, axis=1)
         df = df.sort_values(['location_match', 'created_at'], ascending=[False, False])
+    elif sort_by == "Lead Score":
+        df = df.sort_values(['lead_score', 'created_at'], ascending=[False, False])
 
-    if 'location_match' not in df.columns:
-        df['location_match'] = df.apply(lead_location_match, axis=1)
-
-    display_df = apply_location_badge(df.copy())
+    display_df = apply_quality_badges(df.copy())
 
     # Display columns
     display_columns = [
+        'lead_score',
         'first_name', 'last_name', 'company_name',
         'email', 'phone', 'website_url',
         'template', 'times_seen', 'created_at'
@@ -749,6 +882,7 @@ def render_database_page():
 
     # Column configuration for better display
     column_config = {
+        "lead_score": st.column_config.NumberColumn("Score", help="Lead quality score (0-100)"),
         "website_url": st.column_config.LinkColumn("Website"),
         "times_seen": st.column_config.NumberColumn("Seen", help="Times found in searches"),
         "created_at": st.column_config.DatetimeColumn("First Seen", format="MMM DD, YYYY")

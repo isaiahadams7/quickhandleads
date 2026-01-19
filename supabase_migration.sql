@@ -12,3 +12,9 @@ WHERE api_queries_used IS NULL;
 -- Add location_match flag to leads
 ALTER TABLE leads
 ADD COLUMN IF NOT EXISTS location_match BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE leads
+ADD COLUMN IF NOT EXISTS intent_match BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE leads
+ADD COLUMN IF NOT EXISTS lead_source TEXT;
