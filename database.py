@@ -14,9 +14,23 @@ def get_database():
     Factory function to get the appropriate database instance.
     Uses Supabase if credentials available, otherwise SQLite.
     """
-    # Check if Supabase credentials exist
-    supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_KEY")
+    # Check if Supabase credentials exist (try streamlit secrets first, then env vars)
+    supabase_url = None
+    supabase_key = None
+
+    # Try streamlit secrets first (for Streamlit Cloud deployment)
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets'):
+            supabase_url = st.secrets.get("SUPABASE_URL")
+            supabase_key = st.secrets.get("SUPABASE_KEY")
+    except:
+        pass
+
+    # Fall back to environment variables (for local development)
+    if not supabase_url:
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_KEY")
 
     if supabase_url and supabase_key:
         try:
