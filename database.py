@@ -35,14 +35,18 @@ def get_database():
     if supabase_url and supabase_key:
         try:
             from database_supabase import SupabaseLeadDatabase
-            print("✅ Using Supabase (cloud database)")
+            import sys
+            print("✅ Using Supabase (cloud database)", file=sys.stderr, flush=True)
             return SupabaseLeadDatabase()
         except Exception as e:
-            print(f"⚠️ Supabase connection failed: {e}")
-            print("📁 Falling back to local SQLite database")
+            import sys
+            print(f"⚠️ Supabase connection failed: {e}", file=sys.stderr, flush=True)
+            print("📁 Falling back to local SQLite database", file=sys.stderr, flush=True)
             return LeadDatabase()
     else:
-        print("📁 Using local SQLite database (data/leads.db)")
+        import sys
+        print(f"📁 Using local SQLite database (data/leads.db)", file=sys.stderr, flush=True)
+        print(f"   Checked secrets: supabase_url={bool(supabase_url)}, supabase_key={bool(supabase_key)}", file=sys.stderr, flush=True)
         return LeadDatabase()
 
 
