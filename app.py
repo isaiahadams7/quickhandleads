@@ -228,7 +228,7 @@ def render_search_page():
     # Main content - Database stats
     stats = db.get_stats()
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
         st.metric("Total Leads in DB", stats['total_leads'])
     with col2:
@@ -238,7 +238,9 @@ def render_search_page():
     with col4:
         st.metric("New Today", stats['new_today'])
     with col5:
-        st.metric("Total Searches", stats['total_searches'])
+        st.metric("API Queries Today", stats.get('api_queries_today', 0))
+    with col6:
+        st.metric("Total API Queries", stats.get('total_api_queries', 0))
 
     st.markdown("---")
 
@@ -289,6 +291,9 @@ def render_search_page():
                 status_text.empty()
                 st.stop()
 
+            # Calculate actual API queries used (each query returns 10 results)
+            api_queries_used = (len(results) + 9) // 10  # Round up
+
             # Extract contact information
             status_text.text(f"📊 Extracting contacts...")
             progress_bar.progress(70)
@@ -306,10 +311,10 @@ def render_search_page():
 
             progress_bar.progress(80)
 
-            # Filter useful contacts
+            # Filter useful contacts - must have URL AND at least email or phone
             useful_contacts = [
                 c for c in contacts
-                if c.get('website_url')  # Must have URL for duplicate detection
+                if c.get('website_url') and (c.get('email') or c.get('phone'))  # Must have contact info
             ]
 
             # Save to database and detect duplicates
@@ -319,7 +324,8 @@ def render_search_page():
             new_leads, duplicate_leads = db.add_leads(
                 useful_contacts,
                 template=template_name,
-                locations=locations
+                locations=locations,
+                api_queries_used=api_queries_used
             )
 
             progress_bar.progress(100)
@@ -329,13 +335,15 @@ def render_search_page():
             # Display results
             st.markdown("---")
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("🔍 Total Found", len(useful_contacts))
             with col2:
                 st.metric("✨ New Leads", len(new_leads), delta=len(new_leads))
             with col3:
                 st.metric("🔄 Duplicates", len(duplicate_leads))
+            with col4:
+                st.metric("📊 API Queries Used", api_queries_used)
 
             if len(new_leads) > 0:
                 st.success(f"🎉 Found {len(new_leads)} NEW leads!")
@@ -425,7 +433,7 @@ def render_database_page():
     # Get database stats
     stats = db.get_stats()
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("Total Leads", stats['total_leads'])
     with col2:
@@ -434,6 +442,8 @@ def render_database_page():
         st.metric("With Phone", stats['leads_with_phone'])
     with col4:
         st.metric("New Today", stats['new_today'])
+    with col5:
+        st.metric("API Queries Total", stats.get('total_api_queries', 0))
 
     st.markdown("---")
 

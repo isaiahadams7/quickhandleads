@@ -34,7 +34,8 @@ class SupabaseLeadDatabase:
         self,
         leads: List[Dict],
         template: str,
-        locations: List[str]
+        locations: List[str],
+        api_queries_used: int = 0
     ) -> Tuple[List[Dict], List[Dict]]:
         """
         Add leads to database, detecting duplicates.
@@ -104,7 +105,8 @@ class SupabaseLeadDatabase:
             'locations': location_str,
             'num_results': len(leads),
             'new_leads': len(new_leads),
-            'duplicate_leads': len(duplicate_leads)
+            'duplicate_leads': len(duplicate_leads),
+            'api_queries_used': api_queries_used
         }
         self.supabase.table('search_history').insert(history_data).execute()
 
@@ -156,6 +158,15 @@ class SupabaseLeadDatabase:
         # Total searches
         searches_result = self.supabase.table('search_history').select('id', count='exact').execute()
         stats['total_searches'] = searches_result.count if hasattr(searches_result, 'count') else 0
+
+        # Total API queries used
+        api_queries_result = self.supabase.table('search_history').select('api_queries_used').execute()
+        stats['total_api_queries'] = sum(row.get('api_queries_used', 0) for row in (api_queries_result.data or []))
+
+        # API queries today
+        today = datetime.now().date().isoformat()
+        api_queries_today_result = self.supabase.table('search_history').select('api_queries_used').gte('timestamp', today).execute()
+        stats['api_queries_today'] = sum(row.get('api_queries_used', 0) for row in (api_queries_today_result.data or []))
 
         # Most used template
         template_result = self.supabase.table('search_history').select('template').execute()

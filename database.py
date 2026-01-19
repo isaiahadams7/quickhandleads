@@ -78,6 +78,7 @@ class LeadDatabase:
                 num_results INTEGER,
                 new_leads INTEGER,
                 duplicate_leads INTEGER,
+                api_queries_used INTEGER DEFAULT 0,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -105,7 +106,8 @@ class LeadDatabase:
         self,
         leads: List[Dict],
         template: str,
-        locations: List[str]
+        locations: List[str],
+        api_queries_used: int = 0
     ) -> Tuple[List[Dict], List[Dict]]:
         """
         Add leads to database, detecting duplicates.
@@ -181,14 +183,15 @@ class LeadDatabase:
         # Add to search history
         cursor.execute("""
             INSERT INTO search_history (
-                template, locations, num_results, new_leads, duplicate_leads
-            ) VALUES (?, ?, ?, ?, ?)
+                template, locations, num_results, new_leads, duplicate_leads, api_queries_used
+            ) VALUES (?, ?, ?, ?, ?, ?)
         """, (
             template,
             location_str,
             len(leads),
             len(new_leads),
-            len(duplicate_leads)
+            len(duplicate_leads),
+            api_queries_used
         ))
 
         conn.commit()
@@ -297,6 +300,17 @@ class LeadDatabase:
         # Total searches
         cursor.execute("SELECT COUNT(*) FROM search_history")
         stats['total_searches'] = cursor.fetchone()[0]
+
+        # Total API queries used
+        cursor.execute("SELECT COALESCE(SUM(api_queries_used), 0) FROM search_history")
+        stats['total_api_queries'] = cursor.fetchone()[0]
+
+        # API queries today
+        cursor.execute("""
+            SELECT COALESCE(SUM(api_queries_used), 0) FROM search_history
+            WHERE DATE(timestamp) = DATE('now')
+        """)
+        stats['api_queries_today'] = cursor.fetchone()[0]
 
         # Most used template
         cursor.execute("""
