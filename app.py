@@ -357,7 +357,7 @@ def render_search_page():
                 status_text.text("📍 Searching Places (geo)...")
                 progress_bar.progress(30)
                 places_query = places_query_for_template(template_name)
-                places_raw = places_client.search_locations(
+                places_raw, places_stats = places_client.search_locations(
                     base_query=places_query,
                     locations=locations,
                     max_results=max_results
@@ -366,7 +366,18 @@ def render_search_page():
                 results_source = "places"
 
                 if not results:
+                    geo_note = ""
+                    if places_stats:
+                        geo_note = (
+                            f"Geocoded {places_stats.get('locations_geocoded', 0)}/"
+                            f"{places_stats.get('locations_total', 0)} locations"
+                        )
                     status_text.text("🌐 Places returned 0, falling back to Google CSE...")
+                    st.warning(
+                        "Places returned 0 results. Check that Places API and Geocoding API "
+                        "are enabled and your key allows server-side use. "
+                        f"{geo_note}".strip()
+                    )
                     results = run_cse_search(search_client, query, total_results=max_results, delay=0.5)
                     results_source = "cse"
             else:

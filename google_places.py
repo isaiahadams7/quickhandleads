@@ -74,15 +74,22 @@ class GooglePlacesClient:
         max_results: int = 30,
         radius_miles: int = 25,
         delay_seconds: float = 2.0
-    ) -> List[Dict]:
+    ) -> Tuple[List[Dict], Dict]:
         results: List[Dict] = []
         seen_place_ids = set()
         radius_meters = int(radius_miles * 1609.34)
+
+        stats = {
+            "locations_total": len(locations),
+            "locations_geocoded": 0,
+            "last_status": None
+        }
 
         for loc in locations:
             coords = self.geocode(loc)
             if not coords:
                 continue
+            stats["locations_geocoded"] += 1
 
             query = f"{base_query} in {loc}".strip()
             next_token = None
@@ -93,6 +100,7 @@ class GooglePlacesClient:
                     radius_meters=radius_meters,
                     pagetoken=next_token
                 )
+                stats["last_status"] = data.get("status")
                 for item in data.get("results", []):
                     place_id = item.get("place_id")
                     if not place_id or place_id in seen_place_ids:
@@ -110,7 +118,7 @@ class GooglePlacesClient:
             if len(results) >= max_results:
                 break
 
-        return results
+        return results, stats
 
 
 def places_query_for_template(template_name: str) -> str:
