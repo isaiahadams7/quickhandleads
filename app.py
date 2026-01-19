@@ -9,7 +9,12 @@ import os
 from io import BytesIO
 
 # Import our existing modules
-from google_search import GoogleSearchClient, create_search_from_template
+from google_search import (
+    GoogleSearchClient,
+    create_search_from_template,
+    rank_results_by_locations,
+    result_matches_locations
+)
 from contact_extractor import ContactExtractor
 from search_templates import SearchTemplates
 from database import get_database as get_db_instance
@@ -89,6 +94,25 @@ def get_download_data(df, file_format="excel"):
         return output.getvalue()
     else:  # CSV
         return df.to_csv(index=False).encode('utf-8')
+
+
+def apply_location_badge(df: pd.DataFrame) -> pd.DataFrame:
+    """Add a small badge to the name/company fields when location matches."""
+    if "location_match" not in df.columns:
+        df["location_match"] = False
+
+    def add_badge(row: pd.Series) -> pd.Series:
+        if not row.get("location_match"):
+            return row
+        if row.get("company_name"):
+            row["company_name"] = f"📍 {row['company_name']}"
+        elif row.get("first_name"):
+            row["first_name"] = f"📍 {row['first_name']}"
+        elif row.get("last_name"):
+            row["last_name"] = f"📍 {row['last_name']}"
+        return row
+
+    return df.apply(add_badge, axis=1)
 
 
 def render_search_page():
@@ -289,6 +313,7 @@ def render_search_page():
             progress_bar.progress(30)
 
             results = client.search_multiple_pages(query, total_results=max_results, delay=0.5)
+            ranked_results = rank_results_by_locations(results, locations)
             progress_bar.progress(60)
 
             if not results:
@@ -307,12 +332,13 @@ def render_search_page():
             contacts = []
             extractor = ContactExtractor()
 
-            for result in results:
+            for result in ranked_results:
                 contact_info = extractor.extract_contact_info(
                     title=result.get("title", ""),
                     snippet=result.get("snippet", ""),
                     link=result.get("link", "")
                 )
+                contact_info["location_match"] = result_matches_locations(result, locations)
                 contacts.append(contact_info)
 
             progress_bar.progress(80)
@@ -360,13 +386,14 @@ def render_search_page():
             if show_new_only:
                 if new_leads:
                     st.subheader("✨ New Leads Only")
-                    df = pd.DataFrame(new_leads)
-                    df = df[['first_name', 'last_name', 'company_name', 'website_url', 'email', 'phone']]
-                    df = df.fillna('')
-                    st.dataframe(df, use_container_width=True, height=400, hide_index=True)
+                    df = pd.DataFrame(new_leads).fillna('')
+                    display_df = apply_location_badge(df.copy())
+                    display_df = display_df[['first_name', 'last_name', 'company_name', 'website_url', 'email', 'phone']]
+                    st.dataframe(display_df, use_container_width=True, height=400, hide_index=True)
 
                     # Download button for new leads only
-                    excel_data = get_download_data(df, "excel")
+                    download_df = df[['first_name', 'last_name', 'company_name', 'website_url', 'email', 'phone']]
+                    excel_data = get_download_data(download_df, "excel")
                     st.download_button(
                         "📥 Download New Leads (Excel)",
                         data=excel_data,
@@ -387,10 +414,10 @@ def render_search_page():
                     lead['status'] = '🔄 DUPLICATE'
                     all_results.append(lead)
 
-                df = pd.DataFrame(all_results)
-                df = df[['status', 'first_name', 'last_name', 'company_name', 'website_url', 'email', 'phone']]
-                df = df.fillna('')
-                st.dataframe(df, use_container_width=True, height=400, hide_index=True)
+                df = pd.DataFrame(all_results).fillna('')
+                display_df = apply_location_badge(df.copy())
+                display_df = display_df[['status', 'first_name', 'last_name', 'company_name', 'website_url', 'email', 'phone']]
+                st.dataframe(display_df, use_container_width=True, height=400, hide_index=True)
 
         except Exception as e:
             progress_bar.empty()

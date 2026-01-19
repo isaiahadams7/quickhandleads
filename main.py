@@ -6,7 +6,7 @@ Searches Google for real estate contacts (agents, buyers, sellers, etc.) and exp
 import sys
 import argparse
 from typing import List
-from google_search import GoogleSearchClient, create_realtor_search_query, create_search_from_template
+from google_search import GoogleSearchClient, create_realtor_search_query, create_search_from_template, rank_results_by_locations
 from contact_extractor import ContactExtractor
 from spreadsheet_exporter import SpreadsheetExporter
 from search_templates import SearchTemplates
@@ -162,6 +162,7 @@ Examples:
     # Perform search
     print(f"🔎 Fetching up to {args.results} results...\n")
     results = client.search_multiple_pages(query, total_results=args.results)
+    results = rank_results_by_locations(results, args.locations)
 
     if not results:
         print("\n❌ No results found. Try adjusting your search parameters.")

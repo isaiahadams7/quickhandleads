@@ -3,7 +3,8 @@ Google Custom Search API client for finding real estate contacts and leads.
 """
 import os
 import time
-from typing import List, Dict, Optional
+import re
+from typing import List, Dict, Optional, Set, Tuple
 import requests
 from dotenv import load_dotenv
 from search_templates import SearchTemplates
@@ -16,6 +17,11 @@ class GoogleSearchClient:
     """Client for Google Custom Search API."""
 
     BASE_URL = "https://www.googleapis.com/customsearch/v1"
+    DEFAULT_PARAMS = {
+        "gl": "us",
+        "hl": "en",
+        "cr": "countryUS"
+    }
 
     def __init__(self, api_key: Optional[str] = None, cse_id: Optional[str] = None):
         """
@@ -112,6 +118,7 @@ class GoogleSearchClient:
             "num": min(num_results, 10),  # API max is 10 per request
             "start": start_index
         }
+        params.update(self.DEFAULT_PARAMS)
 
         try:
             response = requests.get(self.BASE_URL, params=params, timeout=30)
@@ -135,6 +142,175 @@ class GoogleSearchClient:
         except ValueError as e:
             print(f"Error parsing response JSON: {e}")
             return []
+
+
+US_STATES = {
+    "AL": "Alabama",
+    "AK": "Alaska",
+    "AZ": "Arizona",
+    "AR": "Arkansas",
+    "CA": "California",
+    "CO": "Colorado",
+    "CT": "Connecticut",
+    "DE": "Delaware",
+    "FL": "Florida",
+    "GA": "Georgia",
+    "HI": "Hawaii",
+    "ID": "Idaho",
+    "IL": "Illinois",
+    "IN": "Indiana",
+    "IA": "Iowa",
+    "KS": "Kansas",
+    "KY": "Kentucky",
+    "LA": "Louisiana",
+    "ME": "Maine",
+    "MD": "Maryland",
+    "MA": "Massachusetts",
+    "MI": "Michigan",
+    "MN": "Minnesota",
+    "MS": "Mississippi",
+    "MO": "Missouri",
+    "MT": "Montana",
+    "NE": "Nebraska",
+    "NV": "Nevada",
+    "NH": "New Hampshire",
+    "NJ": "New Jersey",
+    "NM": "New Mexico",
+    "NY": "New York",
+    "NC": "North Carolina",
+    "ND": "North Dakota",
+    "OH": "Ohio",
+    "OK": "Oklahoma",
+    "OR": "Oregon",
+    "PA": "Pennsylvania",
+    "RI": "Rhode Island",
+    "SC": "South Carolina",
+    "SD": "South Dakota",
+    "TN": "Tennessee",
+    "TX": "Texas",
+    "UT": "Utah",
+    "VT": "Vermont",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WV": "West Virginia",
+    "WI": "Wisconsin",
+    "WY": "Wyoming"
+}
+
+
+def _normalize(text: str) -> str:
+    return text.lower().strip() if text else ""
+
+
+def _parse_locations(locations: List[str]) -> Tuple[Set[str], Set[str], Set[str]]:
+    allowed_cities: Set[str] = set()
+    allowed_state_abbrevs: Set[str] = set()
+    allowed_state_names: Set[str] = set()
+
+    for loc in locations:
+        cleaned = loc.replace(",", " ").strip()
+        parts = [p for p in cleaned.split() if p]
+        if not parts:
+            continue
+
+        state_token = parts[-1].upper()
+        city_tokens = parts[:-1]
+        if state_token in US_STATES:
+            allowed_state_abbrevs.add(state_token)
+            allowed_state_names.add(US_STATES[state_token].lower())
+        else:
+            state_name = " ".join(parts[-2:]).lower()
+            if state_name in [name.lower() for name in US_STATES.values()]:
+                allowed_state_names.add(state_name)
+                if len(parts) >= 2:
+                    city_tokens = parts[:-2]
+            else:
+                city_tokens = parts
+
+        if city_tokens:
+            allowed_cities.add(" ".join(city_tokens).lower())
+
+    return allowed_cities, allowed_state_abbrevs, allowed_state_names
+
+
+def _text_mentions_any(text: str, phrases: Set[str]) -> bool:
+    if not text or not phrases:
+        return False
+    for phrase in phrases:
+        if phrase and re.search(rf"\b{re.escape(phrase)}\b", text):
+            return True
+    return False
+
+
+def _abbrev_mentions(text: str, abbrevs: Set[str]) -> bool:
+    if not text or not abbrevs:
+        return False
+    pattern = r"(?<![A-Za-z])(" + "|".join(sorted(abbrevs)) + r")(?![A-Za-z])"
+    return re.search(pattern, text) is not None
+
+
+def rank_results_by_locations(
+    results: List[Dict],
+    locations: List[str]
+) -> List[Dict]:
+    """
+    Rank results by location relevance.
+    Priority: allowed locations > no location mention > other US state mention.
+    """
+    if not results or not locations:
+        return results
+
+    allowed_cities, allowed_state_abbrevs, allowed_state_names = _parse_locations(locations)
+
+    disallowed_state_abbrevs = set(US_STATES.keys()) - allowed_state_abbrevs
+    disallowed_state_names = {name.lower() for name in US_STATES.values()} - allowed_state_names
+
+    ranked = []
+    for result in results:
+        title = result.get("title", "")
+        snippet = result.get("snippet", "")
+        link = result.get("link", "")
+        combined = f"{title} {snippet} {link}"
+        combined_lower = _normalize(combined)
+
+        has_allowed_city = _text_mentions_any(combined_lower, allowed_cities)
+        has_allowed_state_name = _text_mentions_any(combined_lower, allowed_state_names)
+        has_allowed_state_abbrev = _abbrev_mentions(combined, allowed_state_abbrevs)
+
+        has_other_state_name = _text_mentions_any(combined_lower, disallowed_state_names)
+        has_other_state_abbrev = _abbrev_mentions(combined, disallowed_state_abbrevs)
+
+        if has_allowed_city or has_allowed_state_name or has_allowed_state_abbrev:
+            score = 2
+        elif has_other_state_name or has_other_state_abbrev:
+            score = 0
+        else:
+            score = 1
+
+        ranked.append((score, result))
+
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in ranked]
+
+
+def result_matches_locations(result: Dict, locations: List[str]) -> bool:
+    """Return True if the result mentions any allowed location."""
+    if not locations:
+        return False
+
+    allowed_cities, allowed_state_abbrevs, allowed_state_names = _parse_locations(locations)
+
+    title = result.get("title", "")
+    snippet = result.get("snippet", "")
+    link = result.get("link", "")
+    combined = f"{title} {snippet} {link}"
+    combined_lower = _normalize(combined)
+
+    return (
+        _text_mentions_any(combined_lower, allowed_cities)
+        or _text_mentions_any(combined_lower, allowed_state_names)
+        or _abbrev_mentions(combined, allowed_state_abbrevs)
+    )
 
     def search_multiple_pages(
         self,
