@@ -405,25 +405,26 @@ def render_search_page():
 
             if results_source == "places" and places_client:
                 for place in places_raw:
-                    place_id = place.get("place_id", "")
+                    place_id = place.get("id", "")
                     details = {}
                     if place_id:
                         try:
-                            details = places_client.place_details(place_id).get("result", {})
+                            details = places_client.place_details(place_id)
                         except Exception:
                             details = {}
+                    display_name = place.get("displayName", {}).get("text", "")
                     contact_info = {
                         "first_name": None,
                         "last_name": None,
-                        "company_name": place.get("name", ""),
-                        "website_url": details.get("website") or normalize_places_result(place).get("link", ""),
+                        "company_name": display_name,
+                        "website_url": details.get("websiteUri") or normalize_places_result(place).get("link", ""),
                         "email": None,
-                        "phone": details.get("formatted_phone_number", "")
+                        "phone": details.get("internationalPhoneNumber", "")
                     }
                     contact_info["location_match"] = result_matches_locations(
                         {
-                            "title": place.get("name", ""),
-                            "snippet": place.get("formatted_address", ""),
+                            "title": display_name,
+                            "snippet": place.get("formattedAddress", ""),
                             "link": contact_info["website_url"]
                         },
                         locations
