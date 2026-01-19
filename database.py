@@ -21,9 +21,9 @@ def get_database():
     # Try streamlit secrets first (for Streamlit Cloud deployment)
     try:
         import streamlit as st
-        if hasattr(st, 'secrets'):
-            supabase_url = st.secrets.get("SUPABASE_URL")
-            supabase_key = st.secrets.get("SUPABASE_KEY")
+        if hasattr(st, 'secrets') and "SUPABASE_URL" in st.secrets:
+            supabase_url = st.secrets["SUPABASE_URL"]
+            supabase_key = st.secrets["SUPABASE_KEY"]
     except:
         pass
 
