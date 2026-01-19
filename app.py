@@ -153,29 +153,50 @@ def render_search_page():
         "pinterest.com", "craigslist.org"
     ]
 
-    # Select all / deselect all
+    # Initialize site selection state
+    if 'site_selection' not in st.session_state:
+        st.session_state.site_selection = {
+            "instagram.com": True,
+            "facebook.com": True,
+            "twitter.com": True,
+            "linkedin.com": True,
+            "reddit.com": True,
+            "tiktok.com": False,
+            "nextdoor.com": False,
+            "youtube.com": False,
+            "pinterest.com": False,
+            "craigslist.org": False
+        }
+
+    # Select all / deselect all buttons
     col1, col2 = st.sidebar.columns(2)
-    select_all = col1.button("✓ All", key="select_all", use_container_width=True)
-    deselect_all = col2.button("✗ None", key="deselect_all", use_container_width=True)
+    if col1.button("✓ All", key="select_all", use_container_width=True):
+        for site in available_sites:
+            st.session_state.site_selection[site] = True
+        st.rerun()
 
-    # Default selection (top 5 most popular)
-    default_selected = ["instagram.com", "facebook.com", "twitter.com", "linkedin.com", "reddit.com"]
+    if col2.button("✗ None", key="deselect_all", use_container_width=True):
+        for site in available_sites:
+            st.session_state.site_selection[site] = False
+        st.rerun()
 
+    # Site checkboxes
     selected_sites = []
     cols = st.sidebar.columns(2)
     for idx, site in enumerate(available_sites):
         col = cols[idx % 2]
         site_name = site.replace(".com", "").replace(".org", "").title()
 
-        # Determine default value
-        if select_all:
-            default_value = True
-        elif deselect_all:
-            default_value = False
-        else:
-            default_value = site in default_selected
+        is_checked = col.checkbox(
+            site_name,
+            value=st.session_state.site_selection.get(site, False),
+            key=f"site_{site}_{location_preset}"
+        )
 
-        if col.checkbox(site_name, value=default_value, key=f"site_{site}_{location_preset}"):
+        # Update state
+        st.session_state.site_selection[site] = is_checked
+
+        if is_checked:
             selected_sites.append(site)
 
     st.sidebar.markdown("---")
