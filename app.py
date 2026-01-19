@@ -57,9 +57,15 @@ st.markdown("""
 # Initialize database
 @st.cache_resource
 def get_database():
-    return get_db_instance()
+    db_instance = get_db_instance()
+    # Display database type in sidebar for debugging
+    db_type = "Supabase ☁️" if "Supabase" in type(db_instance).__name__ else "SQLite 📁"
+    return db_instance, db_type
 
-db = get_database()
+db, db_type = get_database()
+
+# Show database status at the top
+st.sidebar.markdown(f"**Database:** {db_type}")
 
 # Initialize session state
 if 'current_view' not in st.session_state:
