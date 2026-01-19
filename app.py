@@ -641,6 +641,11 @@ def render_database_page():
         df['location_match'] = df.apply(lead_location_match, axis=1)
         df = df.sort_values(['location_match', 'created_at'], ascending=[False, False])
 
+    if 'location_match' not in df.columns:
+        df['location_match'] = df.apply(lead_location_match, axis=1)
+
+    display_df = apply_location_badge(df.copy())
+
     # Display columns
     display_columns = [
         'first_name', 'last_name', 'company_name',
@@ -659,7 +664,7 @@ def render_database_page():
     }
 
     st.dataframe(
-        df[display_columns],
+        display_df[display_columns],
         use_container_width=True,
         height=500,
         hide_index=True,
