@@ -47,7 +47,9 @@ class GoogleSearchClient:
         locations: List[str],
         sites: Optional[List[str]] = None,
         email_domains: Optional[List[str]] = None,
-        exclude_terms: Optional[List[str]] = None
+        exclude_terms: Optional[List[str]] = None,
+        intent_phrases: Optional[List[str]] = None,
+        reddit_subreddits: Optional[List[str]] = None
     ) -> str:
         """
         Build a search query from components.
@@ -66,13 +68,18 @@ class GoogleSearchClient:
 
         # Add site restrictions
         if sites:
-            site_query = " OR ".join([f"site:{site}" for site in sites])
+            site_query = _build_site_query(sites, reddit_subreddits)
             query_parts.append(f"({site_query})")
 
         # Add keywords
         if keywords:
             keywords_query = " OR ".join([f'"{kw}"' for kw in keywords])
             query_parts.append(f"({keywords_query})")
+
+        # Add intent phrases (required)
+        if intent_phrases:
+            intent_query = " OR ".join([f'"{p}"' for p in intent_phrases])
+            query_parts.append(f"({intent_query})")
 
         # Add email domains
         if email_domains:
@@ -98,7 +105,8 @@ class GoogleSearchClient:
         self,
         query: str,
         num_results: int = 10,
-        start_index: int = 1
+        start_index: int = 1,
+        date_restrict: Optional[str] = None
     ) -> List[Dict]:
         """
         Execute a search query using Google Custom Search API.
@@ -118,6 +126,8 @@ class GoogleSearchClient:
             "num": min(num_results, 10),  # API max is 10 per request
             "start": start_index
         }
+        if date_restrict:
+            params["dateRestrict"] = date_restrict
         params.update(self.DEFAULT_PARAMS)
 
         try:
@@ -201,6 +211,76 @@ US_STATES = {
 def _normalize(text: str) -> str:
     return text.lower().strip() if text else ""
 
+
+def _build_site_query(sites: List[str], reddit_subreddits: Optional[List[str]]) -> str:
+    site_terms = []
+    for site in sites:
+        if site == "reddit.com" and reddit_subreddits:
+            subs = [sub.strip().lower() for sub in reddit_subreddits if sub.strip()]
+            if subs:
+                sub_terms = [f"site:reddit.com/r/{sub}" for sub in subs]
+                site_terms.append("(" + " OR ".join(sub_terms) + ")")
+            else:
+                site_terms.append("site:reddit.com")
+        else:
+            site_terms.append(f"site:{site}")
+    return " OR ".join(site_terms)
+
+
+def build_reddit_subreddits(locations: List[str], max_subs: int = 12) -> List[str]:
+    subs: List[str] = []
+    for loc in locations:
+        cleaned = loc.replace(",", " ").strip()
+        parts = [p for p in cleaned.split() if p]
+        if not parts:
+            continue
+        state_token = parts[-1].upper()
+        city_tokens = parts[:-1]
+        if state_token in US_STATES:
+            state_name = US_STATES[state_token].lower().replace(" ", "")
+            subs.append(state_name)
+        else:
+            city_tokens = parts
+
+        if city_tokens:
+            city = "".join(city_tokens).lower()
+            subs.append(city)
+
+        if len(subs) >= max_subs:
+            break
+
+    # De-dup while preserving order
+    seen = set()
+    unique = []
+    for sub in subs:
+        if sub not in seen:
+            seen.add(sub)
+            unique.append(sub)
+    return unique[:max_subs]
+
+
+def reddit_intent_phrases() -> List[str]:
+    return [
+        "looking for",
+        "need a",
+        "recommend",
+        "recommendation",
+        "anyone know",
+        "seeking",
+        "in search of",
+        "suggestions"
+    ]
+
+
+def reddit_exclude_terms() -> List[str]:
+    return [
+        "megathread",
+        "weekly",
+        "monthly",
+        "rant",
+        "news",
+        "politics"
+    ]
 
 def _parse_locations(locations: List[str]) -> Tuple[Set[str], Set[str], Set[str]]:
     allowed_cities: Set[str] = set()
@@ -316,7 +396,8 @@ def result_matches_locations(result: Dict, locations: List[str]) -> bool:
         self,
         query: str,
         total_results: int = 100,
-        delay: float = 1.0
+        delay: float = 1.0,
+        date_restrict: Optional[str] = None
     ) -> List[Dict]:
         """
         Search multiple pages of results (handles pagination).
@@ -339,7 +420,12 @@ def result_matches_locations(result: Dict, locations: List[str]) -> bool:
             start_index = page * results_per_page + 1
             print(f"Fetching page {page + 1}/{pages_needed} (results {start_index}-{start_index + results_per_page - 1})...")
 
-            results = self.search(query, num_results=results_per_page, start_index=start_index)
+            results = self.search(
+                query,
+                num_results=results_per_page,
+                start_index=start_index,
+                date_restrict=date_restrict
+            )
 
             if not results:
                 print(f"No more results found at page {page + 1}")

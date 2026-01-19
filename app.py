@@ -14,7 +14,10 @@ from google_search import (
     GoogleSearchClient,
     create_search_from_template,
     rank_results_by_locations,
-    result_matches_locations
+    result_matches_locations,
+    build_reddit_subreddits,
+    reddit_intent_phrases,
+    reddit_exclude_terms
 )
 from google_places import GooglePlacesClient, normalize_places_result, places_query_for_template
 from contact_extractor import ContactExtractor
@@ -132,20 +135,72 @@ def lead_location_match(lead: pd.Series) -> bool:
     return result_matches_locations(result_stub, locations)
 
 
-def run_cse_search(client: GoogleSearchClient, query: str, total_results: int, delay: float) -> list:
+def run_cse_search(
+    client: GoogleSearchClient,
+    query: str,
+    total_results: int,
+    delay: float,
+    date_restrict: str = None
+) -> list:
     """Compat wrapper for older GoogleSearchClient versions without pagination."""
     if hasattr(client, "search_multiple_pages"):
-        return client.search_multiple_pages(query, total_results=total_results, delay=delay)
+        return client.search_multiple_pages(query, total_results=total_results, delay=delay, date_restrict=date_restrict)
 
     results = []
     results_per_page = 10
     pages_needed = (total_results + results_per_page - 1) // results_per_page
     for page in range(pages_needed):
         start_index = page * results_per_page + 1
-        results.extend(client.search(query, num_results=results_per_page, start_index=start_index))
+        results.extend(
+            client.search(
+                query,
+                num_results=results_per_page,
+                start_index=start_index,
+                date_restrict=date_restrict
+            )
+        )
         if page < pages_needed - 1:
             time.sleep(delay)
     return results
+
+
+def filter_recent_reddit_results(results: list, max_age_days: int = 60) -> list:
+    """Drop Reddit results older than max_age_days using Reddit JSON endpoints."""
+    import json
+    import requests
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc).timestamp() - (max_age_days * 86400)
+    filtered = []
+
+    for result in results:
+        link = result.get("link", "")
+        if "reddit.com" not in link:
+            filtered.append(result)
+            continue
+        json_url = link.rstrip("/") + ".json"
+        try:
+            resp = requests.get(json_url, headers={"User-Agent": "LeadFinderBot/1.0"}, timeout=15)
+            if resp.status_code >= 400:
+                filtered.append(result)
+                continue
+            data = resp.json()
+            post = None
+            if isinstance(data, list) and data:
+                children = data[0].get("data", {}).get("children", [])
+                if children:
+                    post = children[0].get("data", {})
+            created = post.get("created_utc") if post else None
+            if created and created >= cutoff:
+                filtered.append(result)
+            elif created is None:
+                filtered.append(result)
+        except (requests.RequestException, json.JSONDecodeError):
+            filtered.append(result)
+
+        time.sleep(0.2)
+
+    return filtered
 
 
 def render_search_page():
@@ -335,19 +390,32 @@ def render_search_page():
             status_text.text("🔍 Building query...")
             progress_bar.progress(20)
 
+            intent_phrases = reddit_intent_phrases() if "reddit.com" in selected_sites else None
+            exclude_terms = list(template["exclude_terms"])
+            reddit_subs = None
+            if "reddit.com" in selected_sites:
+                exclude_terms.extend(reddit_exclude_terms())
+                reddit_subs = build_reddit_subreddits(locations)
+
             if set(selected_sites) != set(template['sites']):
                 query = search_client.build_query(
                     keywords=template["keywords"],
                     locations=locations,
                     sites=selected_sites,
                     email_domains=SearchTemplates.EMAIL_DOMAINS if include_emails else None,
-                    exclude_terms=template["exclude_terms"]
+                    exclude_terms=exclude_terms,
+                    intent_phrases=intent_phrases,
+                    reddit_subreddits=reddit_subs
                 )
             else:
-                query = create_search_from_template(
-                    template_name=template_name,
+                query = search_client.build_query(
+                    keywords=template["keywords"],
                     locations=locations,
-                    include_emails=include_emails
+                    sites=template["sites"],
+                    email_domains=SearchTemplates.EMAIL_DOMAINS if include_emails else None,
+                    exclude_terms=exclude_terms,
+                    intent_phrases=intent_phrases,
+                    reddit_subreddits=reddit_subs
                 )
 
             # Perform search
@@ -384,10 +452,30 @@ def render_search_page():
                         "are enabled and your key allows server-side use. "
                         f"{geo_note}".strip()
                     )
-                    results = run_cse_search(search_client, query, total_results=max_results, delay=0.5)
+                    date_restrict = "d60" if "reddit.com" in selected_sites else None
+                    results = run_cse_search(
+                        search_client,
+                        query,
+                        total_results=max_results,
+                        delay=0.5,
+                        date_restrict=date_restrict
+                    )
+                    if "reddit.com" in selected_sites:
+                        status_text.text("🧹 Filtering Reddit posts by recency (60 days)...")
+                        results = filter_recent_reddit_results(results, max_age_days=60)
                     results_source = "cse"
             else:
-                results = run_cse_search(search_client, query, total_results=max_results, delay=0.5)
+                date_restrict = "d60" if "reddit.com" in selected_sites else None
+                results = run_cse_search(
+                    search_client,
+                    query,
+                    total_results=max_results,
+                    delay=0.5,
+                    date_restrict=date_restrict
+                )
+                if "reddit.com" in selected_sites:
+                    status_text.text("🧹 Filtering Reddit posts by recency (60 days)...")
+                    results = filter_recent_reddit_results(results, max_age_days=60)
                 results_source = "cse"
 
             ranked_results = rank_results_by_locations(results, locations)
