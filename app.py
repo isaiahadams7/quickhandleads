@@ -12,7 +12,7 @@ from io import BytesIO
 from google_search import GoogleSearchClient, create_search_from_template
 from contact_extractor import ContactExtractor
 from search_templates import SearchTemplates
-from database import LeadDatabase
+from database import get_database as get_db_instance
 
 # Page configuration
 st.set_page_config(
@@ -57,7 +57,7 @@ st.markdown("""
 # Initialize database
 @st.cache_resource
 def get_database():
-    return LeadDatabase()
+    return get_db_instance()
 
 db = get_database()
 

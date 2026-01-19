@@ -1,6 +1,6 @@
 """
 Simple database for storing and managing leads to prevent duplicates.
-Uses SQLite for local storage (upgradable to PostgreSQL for production).
+Auto-detects and uses Supabase (cloud) or SQLite (local).
 """
 import sqlite3
 import os
@@ -9,8 +9,31 @@ from typing import List, Dict, Optional, Tuple
 import hashlib
 
 
+def get_database():
+    """
+    Factory function to get the appropriate database instance.
+    Uses Supabase if credentials available, otherwise SQLite.
+    """
+    # Check if Supabase credentials exist
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_KEY")
+
+    if supabase_url and supabase_key:
+        try:
+            from database_supabase import SupabaseLeadDatabase
+            print("✅ Using Supabase (cloud database)")
+            return SupabaseLeadDatabase()
+        except Exception as e:
+            print(f"⚠️ Supabase connection failed: {e}")
+            print("📁 Falling back to local SQLite database")
+            return LeadDatabase()
+    else:
+        print("📁 Using local SQLite database (data/leads.db)")
+        return LeadDatabase()
+
+
 class LeadDatabase:
-    """Manage leads database with duplicate detection."""
+    """Manage leads database with duplicate detection (SQLite backend)."""
 
     def __init__(self, db_path: str = "data/leads.db"):
         """Initialize database connection."""
