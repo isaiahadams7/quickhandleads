@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
+import time
 from io import BytesIO
 
 # Import our existing modules
@@ -126,6 +127,22 @@ def lead_location_match(lead: pd.Series) -> bool:
         "link": lead.get("website_url", "") or ""
     }
     return result_matches_locations(result_stub, locations)
+
+
+def run_cse_search(client: GoogleSearchClient, query: str, total_results: int, delay: float) -> list:
+    """Compat wrapper for older GoogleSearchClient versions without pagination."""
+    if hasattr(client, "search_multiple_pages"):
+        return client.search_multiple_pages(query, total_results=total_results, delay=delay)
+
+    results = []
+    results_per_page = 10
+    pages_needed = (total_results + results_per_page - 1) // results_per_page
+    for page in range(pages_needed):
+        start_index = page * results_per_page + 1
+        results.extend(client.search(query, num_results=results_per_page, start_index=start_index))
+        if page < pages_needed - 1:
+            time.sleep(delay)
+    return results
 
 
 def render_search_page():
@@ -350,10 +367,10 @@ def render_search_page():
 
                 if not results:
                     status_text.text("🌐 Places returned 0, falling back to Google CSE...")
-                    results = search_client.search_multiple_pages(query, total_results=max_results, delay=0.5)
+                    results = run_cse_search(search_client, query, total_results=max_results, delay=0.5)
                     results_source = "cse"
             else:
-                results = search_client.search_multiple_pages(query, total_results=max_results, delay=0.5)
+                results = run_cse_search(search_client, query, total_results=max_results, delay=0.5)
                 results_source = "cse"
 
             ranked_results = rank_results_by_locations(results, locations)
