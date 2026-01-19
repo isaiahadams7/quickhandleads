@@ -372,6 +372,9 @@ def render_search_page():
                             f"Geocoded {places_stats.get('locations_geocoded', 0)}/"
                             f"{places_stats.get('locations_total', 0)} locations"
                         )
+                        status_detail = places_stats.get("last_status")
+                        if status_detail:
+                            geo_note = f"{geo_note}. Places status: {status_detail}"
                     status_text.text("🌐 Places returned 0, falling back to Google CSE...")
                     st.warning(
                         "Places returned 0 results. Check that Places API and Geocoding API "
