@@ -407,9 +407,33 @@ def render_database_page():
     # Sidebar filters
     st.sidebar.title("🔍 Filters")
 
-    # Template filter
-    all_templates = ["All"] + list(set([t for category in SearchTemplates.list_by_category().values() for t in category]))
-    selected_template = st.sidebar.selectbox("Filter by Template", all_templates)
+    # Get unique templates from database
+    all_leads = db.get_all_leads()
+    unique_templates = sorted(set([lead.get('template', 'Unknown') for lead in all_leads]))
+
+    # Template filter with better names
+    template_display_names = {
+        'homebuyers_facebook': '🏠 Homebuyers (Facebook)',
+        'homebuyers_reddit': '🏠 Homebuyers (Reddit)',
+        'homebuyers_instagram': '🏠 Homebuyers (Instagram)',
+        'real_estate_agents': '👔 Real Estate Agents',
+        'real_estate_investors': '💰 Real Estate Investors',
+        'first_time_homebuyers': '🎉 First Time Buyers',
+        'downsizing_seniors': '👴 Downsizing Seniors',
+        'imported': '📥 Imported'
+    }
+
+    # Create filter options
+    filter_options = ["All Leads"] + [template_display_names.get(t, t.replace('_', ' ').title()) for t in unique_templates]
+    selected_display = st.sidebar.selectbox("Filter by Type", filter_options)
+
+    # Map back to actual template name
+    if selected_display == "All Leads":
+        selected_template = None
+    else:
+        # Reverse lookup
+        selected_template = next((k for k, v in template_display_names.items() if v == selected_display),
+                                 selected_display.replace(' ', '_').lower())
 
     # Sorting
     sort_by = st.sidebar.selectbox(
@@ -454,8 +478,7 @@ def render_database_page():
     st.markdown("---")
 
     # Get leads from database
-    template_filter = None if selected_template == "All" else selected_template
-    leads = db.get_all_leads(template=template_filter)
+    leads = db.get_all_leads(template=selected_template)
 
     if not leads:
         st.info("📭 No leads in database yet. Run a search to get started!")
