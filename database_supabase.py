@@ -86,6 +86,8 @@ class SupabaseLeadDatabase:
                     update_data['lead_source'] = lead['lead_source']
                 if lead.get('post_created_at'):
                     update_data['post_created_at'] = lead['post_created_at']
+                if lead.get('keyword_match'):
+                    update_data['keyword_match'] = True
 
                 self.supabase.table('leads').update(update_data).eq('id', existing_lead['id']).execute()
                 duplicate_leads.append(lead)
@@ -105,7 +107,8 @@ class SupabaseLeadDatabase:
                     'location_match': bool(lead.get('location_match')),
                     'intent_match': bool(lead.get('intent_match')),
                     'lead_source': lead.get('lead_source', ''),
-                    'post_created_at': lead.get('post_created_at')
+                    'post_created_at': lead.get('post_created_at'),
+                    'keyword_match': bool(lead.get('keyword_match'))
                 }
 
                 self.supabase.table('leads').insert(insert_data).execute()

@@ -42,14 +42,46 @@ class SearchTemplates:
         templates = {
             # SERVICE PROVIDERS (e.g., realtors, contractors)
             "realtors": {
-                "keywords": ["realtor", "real estate agent", "real estate"],
+                "keywords": [
+                    "realtor",
+                    "real estate agent",
+                    "listing agent",
+                    "buyer's agent",
+                    "broker",
+                    "real estate broker"
+                ],
+                "intent_phrases": [
+                    "looking for a realtor",
+                    "need a realtor",
+                    "recommend a realtor",
+                    "real estate agent recommendations",
+                    "seeking a realtor",
+                    "looking for a real estate agent"
+                ],
                 "sites": SearchTemplates.SOCIAL_SITES,
                 "exclude_terms": ["job", "hiring", "career"],
                 "description": "Find real estate agents and realtors"
             },
 
             "contractors": {
-                "keywords": ["contractor", "home improvement", "handyman", "renovation"],
+                "keywords": [
+                    "contractor",
+                    "general contractor",
+                    "licensed contractor",
+                    "home improvement",
+                    "handyman",
+                    "remodeling",
+                    "renovation",
+                    "home renovation"
+                ],
+                "intent_phrases": [
+                    "looking for a contractor",
+                    "need a contractor",
+                    "recommend a contractor",
+                    "any contractor recommendations",
+                    "looking for a handyman",
+                    "need a handyman"
+                ],
                 "sites": SearchTemplates.SOCIAL_SITES,
                 "exclude_terms": ["job", "hiring", "career"],
                 "description": "Find contractors and home improvement professionals"
@@ -64,7 +96,16 @@ class SearchTemplates:
                     "closed on my house",
                     "new home purchase",
                     "house closing",
-                    "finally a homeowner"
+                    "finally a homeowner",
+                    "offer accepted",
+                    "under contract"
+                ],
+                "intent_phrases": [
+                    "looking to buy a home",
+                    "house hunting",
+                    "first time buyer",
+                    "buying a house",
+                    "pre-approved for mortgage"
                 ],
                 "sites": SearchTemplates.SOCIAL_SITES,
                 "exclude_terms": ["realtor", "agent", "for sale", "listing"],
@@ -78,7 +119,15 @@ class SearchTemplates:
                     "buying my first house",
                     "looking to buy a home",
                     "house hunting",
-                    "pre-approved for mortgage"
+                    "pre-approved for mortgage",
+                    "mortgage pre-approval"
+                ],
+                "intent_phrases": [
+                    "first time buyer",
+                    "buying my first home",
+                    "looking to buy a home",
+                    "house hunting",
+                    "need a mortgage"
                 ],
                 "sites": SearchTemplates.SOCIAL_SITES,
                 "exclude_terms": ["realtor", "agent", "tips", "advice"],
@@ -93,7 +142,16 @@ class SearchTemplates:
                     "house for sale",
                     "looking for a realtor",
                     "need a real estate agent",
-                    "want to list my house"
+                    "want to list my house",
+                    "sell my home",
+                    "list my home"
+                ],
+                "intent_phrases": [
+                    "need to sell my house",
+                    "looking to sell my home",
+                    "want to list my house",
+                    "selling my home",
+                    "need a realtor"
                 ],
                 "sites": SearchTemplates.SOCIAL_SITES,
                 "exclude_terms": ["realtor", "agent", "I can help"],
@@ -106,7 +164,16 @@ class SearchTemplates:
                     "empty nester",
                     "moving to smaller house",
                     "selling family home",
-                    "too much house"
+                    "too much house",
+                    "retiring and moving",
+                    "downsizing house"
+                ],
+                "intent_phrases": [
+                    "looking to downsize",
+                    "downsizing our home",
+                    "moving to a smaller house",
+                    "sell family home",
+                    "empty nest downsizing"
                 ],
                 "sites": SearchTemplates.SOCIAL_SITES,
                 "exclude_terms": ["realtor", "agent"],
@@ -122,7 +189,16 @@ class SearchTemplates:
                     "need to remodel",
                     "kitchen renovation",
                     "bathroom remodel",
-                    "need contractor"
+                    "need contractor",
+                    "home remodel",
+                    "renovation project"
+                ],
+                "intent_phrases": [
+                    "need a contractor",
+                    "looking for a contractor",
+                    "need renovation",
+                    "need to remodel",
+                    "remodeling contractor"
                 ],
                 "sites": SearchTemplates.SOCIAL_SITES,
                 "exclude_terms": ["contractor", "business", "hire me"],
@@ -133,11 +209,35 @@ class SearchTemplates:
                 "keywords": [
                     "need handyman",
                     "home repair needed",
-                    "looking for contractor",
+                    "roof repair",
+                    "roof leak",
+                    "leaking roof",
+                    "plumbing leak",
+                    "plumbing issue",
+                    "water heater",
+                    "pipe burst",
+                    "electrical problem",
+                    "electrical repair",
+                    "hvac repair",
+                    "ac repair",
+                    "furnace repair",
+                    "sump pump",
+                    "foundation crack",
+                    "drywall repair",
+                    "water damage"
+                ],
+                "intent_phrases": [
+                    "need repair",
+                    "need a handyman",
+                    "looking for repair",
+                    "fix my",
+                    "repair needed",
+                    "plumber recommendation",
+                    "electrician recommendation",
                     "roof repair",
                     "plumbing issue",
-                    "electrical problem",
-                    "need help with"
+                    "hvac repair",
+                    "water heater repair"
                 ],
                 "sites": SearchTemplates.SOCIAL_SITES,
                 "exclude_terms": ["contractor", "business", "hire me"],
@@ -152,7 +252,16 @@ class SearchTemplates:
                     "transferring to",
                     "new job in",
                     "just moved to",
-                    "looking for housing in"
+                    "looking for housing in",
+                    "moving for work",
+                    "relocation"
+                ],
+                "intent_phrases": [
+                    "moving to",
+                    "relocating to",
+                    "just moved to",
+                    "looking for housing",
+                    "relocation assistance"
                 ],
                 "sites": SearchTemplates.SOCIAL_SITES,
                 "exclude_terms": ["realtor", "agent", "moving company"],
@@ -167,7 +276,16 @@ class SearchTemplates:
                     "looking to invest in real estate",
                     "building portfolio",
                     "fix and flip",
-                    "house flipping"
+                    "house flipping",
+                    "cash buyer",
+                    "real estate investor"
+                ],
+                "intent_phrases": [
+                    "looking to invest",
+                    "seeking investment property",
+                    "buying rental property",
+                    "fix and flip",
+                    "real estate investor"
                 ],
                 "sites": SearchTemplates.SOCIAL_SITES,
                 "exclude_terms": ["course", "coaching", "mentor"],
@@ -182,7 +300,16 @@ class SearchTemplates:
                     "divorce selling house",
                     "inherited house",
                     "foreclosure",
-                    "sell house quickly"
+                    "sell house quickly",
+                    "motivated seller",
+                    "need to sell quickly"
+                ],
+                "intent_phrases": [
+                    "need to sell fast",
+                    "sell my house quickly",
+                    "urgent sale",
+                    "motivated seller",
+                    "sell fast"
                 ],
                 "sites": SearchTemplates.SOCIAL_SITES,
                 "exclude_terms": ["buy houses", "we buy", "cash offer"],

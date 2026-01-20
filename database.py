@@ -84,6 +84,7 @@ class LeadDatabase:
                 intent_match INTEGER DEFAULT 0,
                 lead_source TEXT,
                 post_created_at TIMESTAMP,
+                keyword_match INTEGER DEFAULT 0,
                 url_hash TEXT UNIQUE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -104,6 +105,10 @@ class LeadDatabase:
             pass
         try:
             cursor.execute("ALTER TABLE leads ADD COLUMN post_created_at TIMESTAMP")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute("ALTER TABLE leads ADD COLUMN keyword_match INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
             pass
 
@@ -197,7 +202,12 @@ class LeadDatabase:
                             ELSE 0
                         END,
                         lead_source = COALESCE(NULLIF(?, ''), lead_source),
-                        post_created_at = COALESCE(NULLIF(?, ''), post_created_at)
+                        post_created_at = COALESCE(NULLIF(?, ''), post_created_at),
+                        keyword_match = CASE
+                            WHEN keyword_match = 1 THEN 1
+                            WHEN ? = 1 THEN 1
+                            ELSE 0
+                        END
                     WHERE id = ?
                 """, (
                     times_seen + 1,
@@ -210,6 +220,7 @@ class LeadDatabase:
                     1 if lead.get('intent_match') else 0,
                     lead.get('lead_source', ''),
                     lead.get('post_created_at', ''),
+                    1 if lead.get('keyword_match') else 0,
                     lead_id
                 ))
                 duplicate_leads.append(lead)
@@ -219,8 +230,9 @@ class LeadDatabase:
                     INSERT INTO leads (
                         first_name, last_name, company_name,
                         website_url, email, phone,
-                        template, locations, location_match, intent_match, lead_source, post_created_at, url_hash
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        template, locations, location_match, intent_match, lead_source,
+                        post_created_at, keyword_match, url_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     lead.get('first_name', ''),
                     lead.get('last_name', ''),
@@ -234,6 +246,7 @@ class LeadDatabase:
                     1 if lead.get('intent_match') else 0,
                     lead.get('lead_source', ''),
                     lead.get('post_created_at', ''),
+                    1 if lead.get('keyword_match') else 0,
                     url_hash
                 ))
                 new_leads.append(lead)

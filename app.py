@@ -17,7 +17,6 @@ from google_search import (
     rank_results_by_locations,
     result_matches_locations,
     build_reddit_subreddits,
-    reddit_intent_phrases,
     reddit_exclude_terms
 )
 from google_places import GooglePlacesClient, normalize_places_result, places_query_for_template
@@ -125,6 +124,10 @@ def apply_quality_badges(df: pd.DataFrame) -> pd.DataFrame:
     """Add compact badges to highlight lead quality signals."""
     def add_badges(row: pd.Series) -> pd.Series:
         badges = []
+        if row.get("good_lead"):
+            badges.append("✅")
+        if row.get("keyword_match") is False:
+            badges.append("⚠️")
         if row.get("intent_match"):
             badges.append("🎯")
         if row.get("location_match"):
@@ -166,10 +169,20 @@ def lead_location_match(lead: pd.Series) -> bool:
     return result_matches_locations(result_stub, locations)
 
 
-def detect_intent_match(text: str) -> bool:
-    phrases = reddit_intent_phrases()
+def lead_keyword_match(lead: pd.Series) -> bool:
+    """Best-effort keyword match using template keywords and stored fields."""
+    template_name = lead.get("template") or ""
+    try:
+        tmpl = SearchTemplates.get_template(template_name)
+    except Exception:
+        return False
+    combined = f"{lead.get('company_name') or ''} {lead.get('website_url') or ''}"
+    return any(kw.lower() in combined.lower() for kw in tmpl.get("keywords", []))
+
+
+def detect_intent_match(text: str, phrases: list) -> bool:
     text_lower = (text or "").lower()
-    return any(phrase in text_lower for phrase in phrases)
+    return any(phrase in text_lower for phrase in (phrases or []))
 
 
 def lead_source_from_link(link: str) -> str:
@@ -200,9 +213,11 @@ def lead_source_from_link(link: str) -> str:
 def compute_lead_score(row: pd.Series) -> pd.Series:
     """Compute a 0-100 lead score and helper fields for display."""
     score = 0
-    if row.get("location_match"):
+    intent_match = bool(row.get("intent_match"))
+    location_match = bool(row.get("location_match"))
+    if location_match:
         score += 35
-    if row.get("intent_match"):
+    if intent_match:
         score += 30
 
     recency_days = row.get("lead_recency_days", 9999)
@@ -224,6 +239,18 @@ def compute_lead_score(row: pd.Series) -> pd.Series:
         contact_score += 6
     score += contact_score
 
+    keyword_match = row.get("keyword_match")
+    intent_match = bool(row.get("intent_match"))
+    if keyword_match is True:
+        score += 8
+    elif keyword_match is False:
+        score -= 5
+
+    # Penalize non-Reddit leads that lack intent/keyword match instead of deleting.
+    if row.get("lead_source") not in {"reddit", "places"}:
+        if not intent_match and not keyword_match:
+            score -= 12
+
     source = row.get("lead_source")
     if source == "places":
         score += 8
@@ -238,10 +265,19 @@ def compute_lead_score(row: pd.Series) -> pd.Series:
     else:
         score += 3
 
-    score = min(100, score)
+    good_lead = intent_match and location_match and recency_days <= 60
+    if good_lead:
+        score += 10
+
+    # Enforce stricter scoring: no "good" score without intent match.
+    if not intent_match:
+        score = min(score, 60)
+
+    score = max(0, min(100, score))
 
     row["lead_score"] = int(score)
     row["contact_score"] = contact_score
+    row["good_lead"] = good_lead
     return row
 
 
@@ -305,14 +341,34 @@ def filter_recent_reddit_results(results: list, max_age_days: int = 60) -> tuple
                 meta[link] = created
             if created and created >= cutoff:
                 filtered.append(result)
-            elif created is None:
-                filtered.append(result)
+            # If we cannot verify recency, drop it for strictness.
         except (requests.RequestException, json.JSONDecodeError):
-            filtered.append(result)
+            pass
 
         time.sleep(0.2)
 
     return filtered, meta
+
+
+def result_matches_keywords(result: dict, keywords: list) -> bool:
+    """Return True if result text includes at least one keyword."""
+    if not keywords:
+        return True
+    combined = f"{result.get('title', '')} {result.get('snippet', '')}".lower()
+    return any(kw.lower() in combined for kw in keywords)
+
+
+def filter_results_by_intent_and_keywords(results: list, keywords: list, intent_phrases: list) -> list:
+    """Keep results that match either template keywords or intent phrases."""
+    filtered = []
+    for result in results:
+        combined_text = f"{result.get('title', '')} {result.get('snippet', '')}"
+        keyword_match = result_matches_keywords(result, keywords)
+        intent_match = detect_intent_match(combined_text, intent_phrases)
+        if not (keyword_match or intent_match):
+            continue
+        filtered.append(result)
+    return filtered
 
 
 def render_search_page():
@@ -442,6 +498,21 @@ def render_search_page():
         )
 
         include_emails = st.checkbox("Include email domains in search", value=True)
+        strict_filter = st.checkbox(
+            "Strict intent/keyword filter (fewer, higher-quality)",
+            value=False,
+            help="When on, results must match intent or template keywords."
+        )
+        preview_only = st.checkbox(
+            "Preview only (do not save to DB)",
+            value=False,
+            help="Shows results without running duplicate checks or saving."
+        )
+        show_debug = st.checkbox(
+            "Show debug counts",
+            value=False,
+            help="Displays counts at each filtering step."
+        )
 
         show_new_only = st.checkbox(
             "Show only NEW leads (hide duplicates)",
@@ -502,7 +573,7 @@ def render_search_page():
             status_text.text("🔍 Building query...")
             progress_bar.progress(20)
 
-            intent_phrases = reddit_intent_phrases()
+            intent_phrases = template.get("intent_phrases", [])
             exclude_terms = list(template["exclude_terms"])
             reddit_subs = None
             if "reddit.com" in selected_sites:
@@ -529,6 +600,8 @@ def render_search_page():
                     intent_phrases=intent_phrases,
                     reddit_subreddits=reddit_subs
                 )
+
+            service_templates = {"realtors", "contractors", "investors"}
 
             # Perform search
             status_text.text(f"🌐 Searching Google...")
@@ -591,6 +664,18 @@ def render_search_page():
                     results, reddit_meta = filter_recent_reddit_results(results, max_age_days=60)
                 results_source = "cse"
 
+            # Strict relevance filter for all non-Places results (optional).
+            raw_results_count = len(results)
+            if strict_filter and results_source != "places":
+                pre_filter_count = len(results)
+                results = filter_results_by_intent_and_keywords(
+                    results,
+                    template["keywords"],
+                    intent_phrases
+                )
+                removed = pre_filter_count - len(results)
+                if removed > 0:
+                    st.info(f"Filtered out {removed} results by intent/keyword rules.")
             ranked_results = rank_results_by_locations(results, locations)
             progress_bar.progress(60)
 
@@ -638,6 +723,13 @@ def render_search_page():
                     )
                     contact_info["intent_match"] = False
                     contact_info["lead_source"] = "places"
+                    contact_info["keyword_match"] = result_matches_keywords(
+                        {
+                            "title": display_name,
+                            "snippet": place.get("formattedAddress", "")
+                        },
+                        template["keywords"]
+                    )
                     contact_info["post_created_at"] = None
                     contacts.append(contact_info)
             else:
@@ -649,8 +741,9 @@ def render_search_page():
                     )
                     combined_text = f"{result.get('title', '')} {result.get('snippet', '')}"
                     contact_info["location_match"] = result_matches_locations(result, locations)
-                    contact_info["intent_match"] = detect_intent_match(combined_text)
+                    contact_info["intent_match"] = detect_intent_match(combined_text, intent_phrases)
                     contact_info["lead_source"] = lead_source_from_link(result.get("link", ""))
+                    contact_info["keyword_match"] = result_matches_keywords(result, template["keywords"])
                     created_utc = reddit_meta.get(result.get("link", ""))
                     if created_utc:
                         contact_info["post_created_at"] = datetime.fromtimestamp(
@@ -662,27 +755,51 @@ def render_search_page():
 
             progress_bar.progress(80)
 
-            # Filter useful contacts - must have URL AND at least email or phone
-            useful_contacts = [
-                c for c in contacts
-                if c.get('website_url') and (c.get('email') or c.get('phone'))  # Must have contact info
-            ]
+            # Filter useful contacts
+            service_templates = {"realtors", "contractors", "investors"}
+            people_templates = {
+                "home_buyers", "first_time_buyers", "home_sellers",
+                "downsizing", "renovation_needed", "home_repair",
+                "relocating", "urgent_sellers"
+            }
+
             if results_source == "places":
                 useful_contacts = [
                     c for c in contacts
                     if c.get('website_url') or c.get('phone')
                 ]
+            elif template_name in people_templates:
+                useful_contacts = [
+                    c for c in contacts
+                    if c.get('website_url') and (c.get('intent_match') or c.get('keyword_match'))
+                ]
+            else:
+                useful_contacts = [
+                    c for c in contacts
+                    if c.get('website_url') and (c.get('email') or c.get('phone'))
+                ]
+
+            if show_debug:
+                st.info(
+                    f"Results: raw={raw_results_count} "
+                    f"post-filter={len(results)} "
+                    f"contacts={len(contacts)} "
+                    f"useful={len(useful_contacts)}"
+                )
 
             # Save to database and detect duplicates
             status_text.text("💾 Saving to database...")
             progress_bar.progress(90)
 
-            new_leads, duplicate_leads = db.add_leads(
-                useful_contacts,
-                template=template_name,
-                locations=locations,
-                api_queries_used=api_queries_used
-            )
+            if preview_only:
+                new_leads, duplicate_leads = useful_contacts, []
+            else:
+                new_leads, duplicate_leads = db.add_leads(
+                    useful_contacts,
+                    template=template_name,
+                    locations=locations,
+                    api_queries_used=api_queries_used
+                )
 
             progress_bar.progress(100)
             status_text.empty()
@@ -740,6 +857,9 @@ def render_search_page():
 
                 df = pd.DataFrame(all_results).fillna('')
                 display_df = apply_location_badge(df.copy())
+                for col in ['status', 'first_name', 'last_name', 'company_name', 'website_url', 'email', 'phone']:
+                    if col not in display_df.columns:
+                        display_df[col] = ''
                 display_df = display_df[['status', 'first_name', 'last_name', 'company_name', 'website_url', 'email', 'phone']]
                 st.dataframe(display_df, use_container_width=True, height=400, hide_index=True)
 
@@ -851,6 +971,10 @@ def render_database_page():
         df['intent_match'] = False
     else:
         df['intent_match'] = df['intent_match'].fillna(False)
+    if 'keyword_match' not in df.columns:
+        df['keyword_match'] = df.apply(lead_keyword_match, axis=1)
+    else:
+        df['keyword_match'] = df['keyword_match'].fillna(False)
     if 'lead_source' not in df.columns:
         df['lead_source'] = ""
     else:
