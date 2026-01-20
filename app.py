@@ -771,7 +771,7 @@ def render_search_page():
             elif template_name in people_templates:
                 useful_contacts = [
                     c for c in contacts
-                    if c.get('website_url') and (c.get('intent_match') or c.get('keyword_match'))
+                    if c.get('website_url')
                 ]
             else:
                 useful_contacts = [
