@@ -661,6 +661,13 @@ def render_search_page():
 
             # Strict relevance filter for all non-Places results (optional).
             raw_results_count = len(results)
+            # Basic relevance filter: match either keyword or intent phrase.
+            if results_source != "places":
+                results = filter_results_by_intent_and_keywords(
+                    results,
+                    template["keywords"],
+                    intent_phrases
+                )
             ranked_results = rank_results_by_locations(results, locations)
             progress_bar.progress(60)
 
