@@ -7,6 +7,7 @@ import pandas as pd
 from datetime import datetime
 import os
 import time
+from datetime import datetime, timezone
 from io import BytesIO
 
 # Import our existing modules
@@ -273,14 +274,14 @@ def run_cse_search(
     return results
 
 
-def filter_recent_reddit_results(results: list, max_age_days: int = 60) -> list:
+def filter_recent_reddit_results(results: list, max_age_days: int = 60) -> tuple:
     """Drop Reddit results older than max_age_days using Reddit JSON endpoints."""
     import json
     import requests
-    from datetime import datetime, timezone
 
     cutoff = datetime.now(timezone.utc).timestamp() - (max_age_days * 86400)
     filtered = []
+    meta = {}
 
     for result in results:
         link = result.get("link", "")
@@ -300,6 +301,8 @@ def filter_recent_reddit_results(results: list, max_age_days: int = 60) -> list:
                 if children:
                     post = children[0].get("data", {})
             created = post.get("created_utc") if post else None
+            if created:
+                meta[link] = created
             if created and created >= cutoff:
                 filtered.append(result)
             elif created is None:
@@ -309,7 +312,7 @@ def filter_recent_reddit_results(results: list, max_age_days: int = 60) -> list:
 
         time.sleep(0.2)
 
-    return filtered
+    return filtered, meta
 
 
 def render_search_page():
@@ -532,6 +535,7 @@ def render_search_page():
             progress_bar.progress(30)
 
             results = []
+            reddit_meta = {}
             results_source = "cse"
             if use_places and places_client:
                 status_text.text("📍 Searching Places (geo)...")
@@ -571,7 +575,7 @@ def render_search_page():
                     )
                     if "reddit.com" in selected_sites:
                         status_text.text("🧹 Filtering Reddit posts by recency (60 days)...")
-                        results = filter_recent_reddit_results(results, max_age_days=60)
+                        results, reddit_meta = filter_recent_reddit_results(results, max_age_days=60)
                     results_source = "cse"
             else:
                 date_restrict = "d60"
@@ -584,7 +588,7 @@ def render_search_page():
                 )
                 if "reddit.com" in selected_sites:
                     status_text.text("🧹 Filtering Reddit posts by recency (60 days)...")
-                    results = filter_recent_reddit_results(results, max_age_days=60)
+                    results, reddit_meta = filter_recent_reddit_results(results, max_age_days=60)
                 results_source = "cse"
 
             ranked_results = rank_results_by_locations(results, locations)
@@ -634,6 +638,7 @@ def render_search_page():
                     )
                     contact_info["intent_match"] = False
                     contact_info["lead_source"] = "places"
+                    contact_info["post_created_at"] = None
                     contacts.append(contact_info)
             else:
                 for result in ranked_results:
@@ -646,6 +651,13 @@ def render_search_page():
                     contact_info["location_match"] = result_matches_locations(result, locations)
                     contact_info["intent_match"] = detect_intent_match(combined_text)
                     contact_info["lead_source"] = lead_source_from_link(result.get("link", ""))
+                    created_utc = reddit_meta.get(result.get("link", ""))
+                    if created_utc:
+                        contact_info["post_created_at"] = datetime.fromtimestamp(
+                            created_utc, tz=timezone.utc
+                        ).isoformat()
+                    else:
+                        contact_info["post_created_at"] = None
                     contacts.append(contact_info)
 
             progress_bar.progress(80)
@@ -845,7 +857,15 @@ def render_database_page():
         df['lead_source'] = df['lead_source'].fillna("")
 
     created_at = pd.to_datetime(df['created_at'], utc=True, errors='coerce')
-    df['lead_recency_days'] = (pd.Timestamp.utcnow() - created_at).dt.days.fillna(9999)
+    post_created_at = pd.to_datetime(df.get('post_created_at'), utc=True, errors='coerce')
+    now = pd.Timestamp.utcnow()
+    recency_days = (now - created_at).dt.days
+    use_post = post_created_at.notna()
+    recency_days = recency_days.where(~use_post, (now - post_created_at).dt.days)
+    if 'lead_source' in df.columns:
+        reddit_missing = (df['lead_source'] == "reddit") & post_created_at.isna()
+        recency_days = recency_days.mask(reddit_missing, 9999)
+    df['lead_recency_days'] = recency_days.fillna(9999)
     df = df.apply(compute_lead_score, axis=1)
 
     if min_score > 0:
