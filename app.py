@@ -498,11 +498,6 @@ def render_search_page():
         )
 
         include_emails = st.checkbox("Include email domains in search", value=True)
-        strict_filter = st.checkbox(
-            "Strict intent/keyword filter (fewer, higher-quality)",
-            value=False,
-            help="When on, results must match intent or template keywords."
-        )
         preview_only = st.checkbox(
             "Preview only (do not save to DB)",
             value=False,
@@ -666,16 +661,6 @@ def render_search_page():
 
             # Strict relevance filter for all non-Places results (optional).
             raw_results_count = len(results)
-            if strict_filter and results_source != "places":
-                pre_filter_count = len(results)
-                results = filter_results_by_intent_and_keywords(
-                    results,
-                    template["keywords"],
-                    intent_phrases
-                )
-                removed = pre_filter_count - len(results)
-                if removed > 0:
-                    st.info(f"Filtered out {removed} results by intent/keyword rules.")
             ranked_results = rank_results_by_locations(results, locations)
             progress_bar.progress(60)
 
